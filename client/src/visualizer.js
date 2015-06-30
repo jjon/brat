@@ -2,8 +2,6 @@
 // vim:set ft=javascript ts=2 sw=2 sts=2 cindent:
 
 var Visualizer = (function($, window, undefined) {
-    var fontLoadTimeout = 5000; // 5 seconds
-  
     var DocumentData = function(text) {
       this.text = text;
       this.chunks = [];
@@ -321,7 +319,7 @@ var Visualizer = (function($, window, undefined) {
       var minArcSlant = 8;
       var arcHorizontalSpacing = 10; // min space boxes with connecting arc
       var rowSpacing = -5;          // for some funny reason approx. -10 gives "tight" packing.
-      var sentNumMargin = 20;
+      var sentNumMargin = 31;
       var smoothArcCurves = true;   // whether to use curves (vs lines) in arcs
       var smoothArcSteepness = 0.5; // steepness of smooth curves (control point)
       var reverseArcControlx = 5;   // control point distance for "UFO catchers"
@@ -381,13 +379,6 @@ var Visualizer = (function($, window, undefined) {
         'AddedAnnotation', 'MissingAnnotation', 'ChangedAnnotation'];
 
       this.arcDragOrigin = null; // TODO
-
-      // due to silly Chrome bug, I have to make it pay attention
-      var forceRedraw = function() {
-        if (!$.browser.chrome) return; // not needed
-        $svg.css('margin-bottom', 1);
-        setTimeout(function() { $svg.css('margin-bottom', 0); }, 0);
-      }
 
       var rowBBox = function(span) {
         var box = $.extend({}, span.rectBox); // clone
@@ -657,7 +648,7 @@ var Visualizer = (function($, window, undefined) {
           // instead of using the first attribute def found
           var attrType = (eventAttributeTypes[attr[1]] ||
                           entityAttributeTypes[attr[1]]);
-          var attrValue = attrType && attrType.values[attrType.bool || attr[3]];
+          var attrValue = attrType && attrType.values.byName[attrType.bool || attr[3]];
           var span = data.spans[attr[2]];
           if (!span) {
             dispatcher.post('messages', [[['Annotation ' + attr[2] + ', referenced from attribute ' + attr[0] + ', does not exist.', 'error']]]);
@@ -1027,7 +1018,7 @@ var Visualizer = (function($, window, undefined) {
                 warning = true;
                 return;
               }
-              var val = attr.values[attr.bool || valType];
+              var val = attr.values.byName[attr.bool || valType];
               if (!val) {
                 // non-existent value
                 warning = true;
@@ -1041,9 +1032,11 @@ var Visualizer = (function($, window, undefined) {
               if (val.glyph) {
                 if (val.position == "left") {
                   prefix = val.glyph + prefix;
-                  var css = 'glyph';
-                  if (attr.css) css += ' glyph_' + Util.escapeQuotes(attr.css);
-                  svgtext.span(val.glyph, { 'class': css });
+                  var tspan_attrs = { 'class' : 'glyph' };
+                  if (val.glyphColor) {
+                    tspan_attrs.fill = val.glyphColor;
+                  }
+                  svgtext.span(val.glyph, tspan_attrs);
                 } else { // XXX right is implied - maybe change
                   postfixArray.push([attr, val]);
                   postfix += val.glyph;
@@ -1060,9 +1053,11 @@ var Visualizer = (function($, window, undefined) {
               text += ' ' + postfix;
               svgtext.string(' ');
               $.each(postfixArray, function(elNo, el) {
-                var css = 'glyph';
-                if (el[0].css) css += ' glyph_' + Util.escapeQuotes(el[0].css);
-                svgtext.span(el[1].glyph, { 'class': css });
+                var tspan_attrs = { 'class' : 'glyph' };
+                if (el[1].glyphColor) {
+                  tspan_attrs.fill = el[1].glyphColor;
+                }
+                svgtext.span(el[1].glyph, tspan_attrs);
               });
             }
             if (warning) {
@@ -1191,7 +1186,7 @@ var Visualizer = (function($, window, undefined) {
         var chunkTexts = {}; // set of span texts
         $.each(data.chunks, function(chunkNo, chunk) {
           chunk.row = undefined; // reset
-          if (!(chunk.text in chunkTexts)) chunkTexts[chunk.text] = []
+          if (!chunkTexts.hasOwnProperty(chunk.text)) chunkTexts[chunk.text] = []
           var chunkText = chunkTexts[chunk.text];
 
           // here we also need all the spans that are contained in
@@ -1232,8 +1227,13 @@ var Visualizer = (function($, window, undefined) {
               firstChar -= textUpToFirstChar.length - textUpToFirstCharUnspaced.length;
               lastChar -= textUpToLastChar.length - textUpToLastCharUnspaced.length;
 
-              var startPos = text.getStartPositionOfChar(firstChar).x;
-              var endPos = (lastChar < 0)
+              var startPos, endPos;
+              if (firstChar < fragment.chunk.text.length) {
+                startPos = text.getStartPositionOfChar(firstChar).x;
+              } else {
+                startPos = text.getComputedTextLength();
+              }
+              endPos = (lastChar < firstChar)
                 ? startPos
                 : text.getEndPositionOfChar(lastChar).x;
               fragment.curly = {
@@ -1419,6 +1419,14 @@ Util.profileStart('chunks');
 
         $.each(data.spanDrawOrderPermutation, function(spanIdNo, spanId) {
           var span = data.spans[spanId];
+          var spanDesc = spanTypes[span.type];
+          var bgColor = ((spanDesc && spanDesc.bgColor) ||
+                          (spanTypes.SPAN_DEFAULT &&
+                          spanTypes.SPAN_DEFAULT.bgColor) || '#ffffff');
+          if (bgColor == "hidden") {
+            span.hidden = true;
+            return;
+          }
 
           var f1 = span.fragments[0];
           var f2 = span.fragments[span.fragments.length - 1];
@@ -1543,7 +1551,6 @@ Util.profileStart('chunks');
             }
           }
 
-          reservations = new Array();
           chunk.group = svg.group(row.group);
           chunk.highlightGroup = svg.group(chunk.group);
 
@@ -1564,6 +1571,7 @@ Util.profileStart('chunks');
             var bgColor = ((spanDesc && spanDesc.bgColor) ||
                            (spanTypes.SPAN_DEFAULT &&
                             spanTypes.SPAN_DEFAULT.bgColor) || '#ffffff');
+            if (span.hidden) return;
             var fgColor = ((spanDesc && spanDesc.fgColor) ||
                            (spanTypes.SPAN_DEFAULT &&
                             spanTypes.SPAN_DEFAULT.fgColor) || '#000000');
@@ -1915,13 +1923,16 @@ Util.profileStart('chunks');
             // if we added a gap, center the intervening elements
             spacing /= 2;
             var firstChunkInRow = row.chunks[row.chunks.length - 1];
-            if (spacingChunkId < firstChunkInRow.index) {
-              spacingChunkId = firstChunkInRow.index + 1;
-            }
-            for (var chunkIndex = spacingChunkId; chunkIndex < chunk.index; chunkIndex++) {
-              var movedChunk = data.chunks[chunkIndex];
-              translate(movedChunk, movedChunk.translation.x + spacing, 0);
-              movedChunk.textX += spacing;
+            // are there already some intervening chunks to move?
+            if (firstChunkInRow) {
+              if (spacingChunkId < firstChunkInRow.index) {
+                spacingChunkId = firstChunkInRow.index + 1;
+              }
+              for (var chunkIndex = spacingChunkId; chunkIndex < chunk.index; chunkIndex++) {
+                var movedChunk = data.chunks[chunkIndex];
+                translate(movedChunk, movedChunk.translation.x + spacing, 0);
+                movedChunk.textX += spacing;
+              }
             }
           }
 
@@ -1957,6 +1968,10 @@ Util.profileStart('arcsPrep');
           arc.jumpHeight = 0;
           var fromFragment = data.spans[arc.origin].headFragment;
           var toFragment = data.spans[arc.target].headFragment;
+          if (fromFragment.span.hidden || toFragment.span.hidden) {
+            arc.hidden = true;
+            return;
+          }
           if (fromFragment.towerId > toFragment.towerId) {
             var tmp = fromFragment; fromFragment = toFragment; toFragment = tmp;
           }
@@ -2044,6 +2059,7 @@ Util.profileStart('arcs');
         var arcCache = {};
         // add the arcs
         $.each(data.arcs, function(arcNo, arc) {
+          if (arc.hidden) return;
           // separate out possible numeric suffix from type
           var noNumArcType;
           var splitArcType;
@@ -2096,6 +2112,7 @@ Util.profileStart('arcs');
           var color = ((arcDesc && arcDesc.color) ||
                        (spanTypes.ARC_DEFAULT && spanTypes.ARC_DEFAULT.color) ||
                        '#000000');
+          if (color == 'hidden') return;
           var symmetric = arcDesc && arcDesc.properties && arcDesc.properties.symmetric;
           var dashArray = arcDesc && arcDesc.dashArray;
           var arrowHead = ((arcDesc && arcDesc.arrowHead) ||
@@ -2722,11 +2739,12 @@ Util.profileStart('chunkFinish');
             orderedIdx.sort(function(a,b) { return Util.cmp(chunk.fragments[b].nestingHeight, chunk.fragments[a].nestingHeight) });
 
             for(var i=0; i<chunk.fragments.length; i++) {
-              var fragment=chunk.fragments[orderedIdx[i]];
+              var fragment = chunk.fragments[orderedIdx[i]];
               var spanDesc = spanTypes[fragment.span.type];
               var bgColor = ((spanDesc && spanDesc.bgColor) ||
                              (spanTypes.SPAN_DEFAULT && spanTypes.SPAN_DEFAULT.bgColor) ||
                              '#ffffff');
+              if (fragment.span.hidden) continue;
 
               // Tweak for nesting depth/height. Recognize just three
               // levels for now: normal, nested, and nesting, where
@@ -2805,6 +2823,7 @@ Util.profileStart('finish');
 
         $svg.width(canvasWidth);
         $svg.height(y);
+        $svg.attr("viewBox", "0 0 " + canvasWidth + " " + y);
         $svgDiv.height(y);
 
 Util.profileEnd('finish');
@@ -2874,7 +2893,7 @@ Util.profileReport();
       };
 
       var triggerRender = function() {
-        if (svg && ((isRenderRequested && isCollectionLoaded) || requestedData) && Visualizer.areFontsLoaded) {
+        if (svg && ((isRenderRequested && isCollectionLoaded) || requestedData) && Util.areFontsLoaded()) {
           isRenderRequested = false;
           if (requestedData) {
 
@@ -2935,6 +2954,7 @@ Util.profileStart('before render');
           var bgColor = ((spanDesc && spanDesc.bgColor) ||
                          (spanTypes.SPAN_DEFAULT && spanTypes.SPAN_DEFAULT.bgColor) ||
                          '#ffffff');
+          if (span.hidden) return;
           highlight = [];
           $.each(span.fragments, function(fragmentNo, fragment) {
             highlight.push(svg.rect(highlightGroup,
@@ -2990,7 +3010,6 @@ Util.profileStart('before render');
                 parent().
                 addClass('highlight');
           }
-          forceRedraw();
         } else if (!that.arcDragOrigin && (id = target.attr('data-arc-role'))) {
           var originSpanId = target.attr('data-arc-origin');
           var targetSpanId = target.attr('data-arc-target');
@@ -3058,7 +3077,6 @@ Util.profileStart('before render');
           highlightSpans.removeClass('highlight');
           highlightSpans = undefined;
         }
-        forceRedraw();
       };
 
       var setAbbrevs = function(_abbrevsOn) {
@@ -3185,15 +3203,16 @@ Util.profileStart('before render');
         $.each(response_types, function(aTypeNo, aType) {
           processed[aType.type] = aType;
           // count the values; if only one, it's a boolean attribute
-          var values = [];
-          for (var i in aType.values) {
-            if (aType.values.hasOwnProperty(i)) {
-              values.push(i);
-            }
+          if (aType.values.length == 1) {
+            aType.bool = aType.values[0].name;
           }
-          if (values.length == 1) {
-            aType.bool = values[0];
-          }
+          // We need attribute values to be stored as an array, in the correct order,
+          // but for efficiency of access later we also create a map of each value 
+          // name to the corresponding value dictionary.
+          aType.values.byName = {}
+          $.each(aType.values, function(valueNo, val) {
+              aType.values.byName[val.name] = val;
+          });
         });
         return processed;
       }
@@ -3246,44 +3265,7 @@ Util.profileStart('before render');
         return !drawing;
       };
 
-      // If we are yet to load our fonts, dispatch them
-      if (!Visualizer.areFontsLoaded) {
-        var webFontConfig = {
-          custom: {
-            families: [
-              'Astloch',
-              'PT Sans Caption',
-              //        'Ubuntu',
-              'Liberation Sans'
-            ],
-            /* For some cases, in particular for embedding, we need to
-              allow for fonts being hosted elsewhere */
-            urls: webFontURLs !== undefined ? webFontURLs : [
-              'static/fonts/Astloch-Bold.ttf',
-              'static/fonts/PT_Sans-Caption-Web-Regular.ttf',
-              //
-              'static/fonts/Liberation_Sans-Regular.ttf'
-            ],
-          },
-          active: proceedWithFonts,
-          inactive: proceedWithFonts,
-          fontactive: function(fontFamily, fontDescription) {
-            // Note: Enable for font debugging
-            //console.log("font active: ", fontFamily, fontDescription);
-          },
-          fontloading: function(fontFamily, fontDescription) {
-            // Note: Enable for font debugging
-            //console.log("font loading:", fontFamily, fontDescription);
-          },
-        };
-        WebFont.load(webFontConfig);
-        setTimeout(function() {
-          if (!Visualizer.areFontsLoaded) {
-            console.error('Timeout in loading fonts');
-            proceedWithFonts();
-          }
-        }, fontLoadTimeout);
-      }
+      Util.loadFonts(webFontURLs, dispatcher);
 
       dispatcher.
           on('collectionChanged', collectionChanged).
@@ -3301,15 +3283,6 @@ Util.profileStart('before render');
           on('clearSVG', clearSVG).
           on('mouseover', onMouseOver).
           on('mouseout', onMouseOut);
-    };
-
-    Visualizer.areFontsLoaded = false;
-
-    var proceedWithFonts = function() {
-      Visualizer.areFontsLoaded = true;
-      // Note: Enable for font debugging
-      //console.log("fonts done");
-      Dispatcher.post('triggerRender');
     };
 
     return Visualizer;

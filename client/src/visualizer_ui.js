@@ -592,18 +592,21 @@ var VisualizerUI = (function($, window, undefined) {
         // but is much faster than dialog('open') for large dialogs, see
         // https://github.com/nlplab/brat/issues/934
 
-        var widget = $dialog.data('dialog');
-        if (widget._isOpen) { return; }
+        var self = $dialog.dialog('instance');
+        
+        if (self._isOpen) { return; }
 
-        var self = widget,
-                options = self.options,
-                uiDialog = self.uiDialog;
-
-        self.overlay = options.modal ? new $.ui.dialog.overlay(self) : null;
-        self._size();
-        uiDialog.show(options.show);
-        self.moveToTop(true);
         self._isOpen = true;
+        self.opener = $(self.document[0].activeElement);
+
+        self._size();
+        self._createOverlay();
+        self._moveToTop(null, true);
+
+        if (self.overlay) {
+          self.overlay.css( "z-index", self.uiDialog.css( "z-index" ) - 1 );
+        }
+        self._show(self.uiDialog, self.options.show);
         self._trigger('open');
       };
 
@@ -859,7 +862,7 @@ var VisualizerUI = (function($, window, undefined) {
             if (formatted === null) {
               var m = type.match(/^(.*?)(?:\/(right))?$/);
               cssClass = m[2] ? 'rightalign' : null;
-              formatted = $.sprintf(m[1], datum);
+              formatted = sprintf(m[1], datum);
             }
             html.push('<td' + (cssClass ? ' class="' + cssClass + '"' : '') + '>' +
                 formatted + '</td>');
@@ -1002,7 +1005,7 @@ var VisualizerUI = (function($, window, undefined) {
         };
       };
 
-      $('#search_form_event_roles .search_event_role select').live('change', searchEventRoleChanged);
+      $('#search_form_event_roles').on('change', '.search_event_role select', searchEventRoleChanged);
 
       // adding new role rows
       var addEmptySearchEventRole = function() {
@@ -1046,8 +1049,8 @@ var VisualizerUI = (function($, window, undefined) {
         $row.remove();
       }
 
-      $('#search_form_event_roles .search_event_role_add input').live('click', addEmptySearchEventRole);
-      $('#search_form_event_roles .search_event_role_del input').live('click', delSearchEventRole);
+      $('#search_form_event_roles').on('click', '.search_event_role_add input', addEmptySearchEventRole);
+      $('#search_form_event_roles').on('click', '.search_event_role_del input', delSearchEventRole);
 
       // When event type changes, the event roles do as well
       // Also, put in one empty role row
@@ -1156,7 +1159,7 @@ var VisualizerUI = (function($, window, undefined) {
 
       var activeSearchTab = function() {
         // activeTab: 0 = Text, 1 = Entity, 2 = Event, 3 = Relation, 4 = Notes, 5 = Load
-        var activeTab = $('#search_tabs').tabs('option', 'selected');
+        var activeTab = $('#search_tabs').tabs('option', 'active');
         return ['searchText', 'searchEntity', 'searchEvent',
             'searchRelation', 'searchNote', 'searchLoad'][activeTab];
       }
@@ -1246,6 +1249,8 @@ var VisualizerUI = (function($, window, undefined) {
             opts.arg1type = $('#search_form_relation_arg1_type').val() || '';
             opts.arg2 = $('#search_form_relation_arg2_text').val();
             opts.arg2type = $('#search_form_relation_arg2_type').val() || '';
+            opts.show_text = $('#search_form_relation_show_arg_text_on').is(':checked');
+            opts.show_type = $('#search_form_relation_show_arg_type_on').is(':checked');
             break;
           case 'searchNote':
             opts.category = $('#search_form_note_category').val() || '';
@@ -1726,6 +1731,8 @@ var VisualizerUI = (function($, window, undefined) {
         }
       }
 
+      $('#source_collection_conf').buttonset();
+
       var gotCurrent = function(_coll, _doc, _args) {
         var oldColl = coll;
 
@@ -1745,6 +1752,7 @@ var VisualizerUI = (function($, window, undefined) {
           var $collectionDownloadLink = $('<a target="brat_search"/>')
             .text('Download tar.gz')
             .attr('href', 'ajax.cgi?action=downloadCollection&collection=' + encodeURIComponent(coll)
+            + '&include_conf=' + ($('#source_collection_conf_on').is(':checked') ? 1 : 0)
             // TODO: Extract the protocol version into somewhere global
             + '&protocol=' + 1);
           $sourceCollection.append($collectionDownloadLink);
@@ -1753,7 +1761,7 @@ var VisualizerUI = (function($, window, undefined) {
           $cmpButton = $('#side-by-side_cmp').empty();
           var $cmpLink = $('<a target="_blank"/>')
             .text('Comparison mode')
-            .attr('href', 'diff.xhtml?diff=' + encodeURIComponent(coll));
+            .attr('href', 'diff.xhtml#?diff=' + encodeURIComponent(coll));
           $cmpButton.append($cmpLink);
           $cmpLink.button();
         }
@@ -1980,7 +1988,8 @@ var VisualizerUI = (function($, window, undefined) {
 
 
       var tutorialForm = $('#tutorial');
-      if (!$.browser.webkit) {
+      var isWebkit = 'WebkitAppearance' in document.documentElement.style;
+      if (!isWebkit) {
         // Inject the browser warning
         $('#browserwarning').css('display', 'block');
       }
@@ -2190,6 +2199,12 @@ var VisualizerUI = (function($, window, undefined) {
         dispatcher.post('configurationChanged');
       });
 
+      $('#type_collapse_limit').change(function(evt) {
+        Configuration.typeCollapseLimit = parseInt($(this).val(), 10);
+        console.log("changed to", Configuration.typeCollapseLimit);
+        dispatcher.post('configurationChanged');
+      });
+
       var isReloadOkay = function() {
         // do not reload while the user is in the dialog
         return currentForm == null;
@@ -2244,6 +2259,9 @@ var VisualizerUI = (function($, window, undefined) {
         // Autorefresh
         $('#autorefresh_mode')[0].checked = Configuration.autorefreshOn;
         $('#autorefresh_mode').button('refresh');
+
+        // Type Collapse Limit
+        $('#type_collapse_limit')[0].value = Configuration.typeCollapseLimit;
       }
 
       $('#prev').button().click(function() {
@@ -2253,6 +2271,14 @@ var VisualizerUI = (function($, window, undefined) {
         return moveInFileBrowser(+1);
       });
       $('#footer').show();
+
+      $('#source_collection_conf_on, #source_collection_conf_off').change(function() {
+        var conf = $('#source_collection_conf_on').is(':checked') ? 1 : 0;
+        var $source_collection_link = $('#source_collection a');
+        var link = $source_collection_link.attr('href').replace(/&include_conf=./, '&include_conf=' + conf);
+        $source_collection_link.attr('href', link);
+      });
+
 
       var rememberData = function(_data) {
         if (_data && !_data.exception) {
